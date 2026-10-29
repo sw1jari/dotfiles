@@ -247,8 +247,12 @@ keycode 253 =
 keycode 254 = XF86WWAN NoSymbol XF86WWAN
 keycode 255 = XF86RFKill NoSymbol XF86RFKill
 
-! Swap caps lock and escape
-remove Lock = Caps_Lock
-keysym Escape = Caps_Lock
-keysym Caps_Lock = Escape
+! Idempotently set caps lock to escape and vice versa
+clear Lock
+keycode 66 = NoSymbol
+keycode 9 = NoSymbol
+
+keycode 66 = Escape
+keycode 9 = Caps_Lock
 add Lock = Caps_Lock
+

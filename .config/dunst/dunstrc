@@ -30,7 +30,7 @@
     show_indicators = yes
     icon_position = left
     max_icon_size = 32
-    icon_path = /usr/share/icons/Arc/status/16:/usr/share/icons/Arc/devices:/usr/share/icons/Arc/apps/16
+    icon_path = /usr/share/icons/Arc/status/128:/usr/share/icons/Arc/devices:/usr/share/icons/Arc/apps/128
     sticky_history = yes
     history_length = 20
     always_run_script = true
@@ -61,4 +61,4 @@
     foreground = "#f0e0e0"
     frame_color = "#d64e4e"
     timeout = 0
-    icon = /usr/share/icons/Arc/status/16/dialog-warning.png
+    icon = /usr/share/icons/Arc/status/128/dialog-warning.png

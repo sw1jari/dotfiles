@@ -1,4 +1,53 @@
+super + p
+	dmenu_run
 super + w
-	$BROWSER
-super + r
-	$TERMINAL -e lf
+	MOZ_DBUS_REMOTE=1 firefox
+super + shift + l
+	slock
+super + shift + F1
+	slock & systemctl suspend
+super + shift + F6
+	pkill -15 dwm
+super + shift + F12
+	poweroff
+super + shift + s
+	clipscreen
+super + c
+	clipnewline
+
+# Media keys
+XF86AudioRaiseVolume
+	pactl set-sink-volume @DEFAULT_SINK@ +5% && dunstify -r 9900 "Volume $(pamixer --get-volume-human)"
+
+XF86AudioLowerVolume
+	pactl set-sink-volume @DEFAULT_SINK@ -5% && dunstify -r 9900 "Volume $(pamixer --get-volume-human)"
+
+XF86AudioMute
+	pactl set-sink-mute @DEFAULT_SINK@ toggle && dunstify -r 9900 "Volume $(pamixer --get-volume-human)"
+
+XF86AudioNext
+	mediakey next
+
+XF86AudioPrev
+	mediakey previous
+
+XF86AudioPlay
+	mediakey play-pause
+
+# Decrease screen brightness
+XF86MonBrightnessDown
+    brightness-down
+
+# Increase screen brightness
+XF86MonBrightnessUp
+    brightness-up
+
+
+super + e
+	emoji
+
+super + g
+	greek
+
+super + equal
+	unitex
