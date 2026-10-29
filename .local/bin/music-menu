@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# dmenu music picker for /data/music; plays with mpv in the background and
+# publishes the current track to $XDG_RUNTIME_DIR/music-now (read by dwm-status)
+
+MUSIC_DIR="${MUSIC_DIR:-/data/music}"
+RUN="${XDG_RUNTIME_DIR:-/tmp}"
+SOCK="$RUN/music-mpv.sock"
+PIDFILE="$RUN/music-mpv.pid"
+NOW="$RUN/music-now"
+LUA="$HOME/.config/mpv/scripts-music/now-playing.lua"
+EXT='mp3|m4a|flac|ogg|opus|wav|aac|wma|mp4|mkv|webm'
+
+PLAY_ALL="▶ Play whole album"
+BACK=".. back"
+
+is_playing() { [ -S "$SOCK" ] && [ -f "$PIDFILE" ] && kill -0 "$(< "$PIDFILE")" 2>/dev/null; }
+
+mpv_cmd() { printf '{"command":%s}\n' "$1" | socat - "UNIX-CONNECT:$SOCK" >/dev/null 2>&1; }
+
+stop_music() {
+    is_playing && kill "$(< "$PIDFILE")" 2>/dev/null
+    rm -f "$SOCK" "$PIDFILE" "$NOW"
+}
+
+# play the given files in order, replacing whatever is playing
+play() {
+    stop_music
+    setsid -f mpv --no-video --mute=no --loop-file=no --loop-playlist=no --force-window=no --no-terminal --idle=no \
+        --input-ipc-server="$SOCK" --script="$LUA" -- "$@" >/dev/null 2>&1 &
+    sleep 0.2
+    pgrep -n -f "input-ipc-server=$SOCK" > "$PIDFILE"
+}
+
+# audio files below $1, sorted, into the array named by $2
+collect() {
+    mapfile -d '' -t "$2" < <(find "$1" -type f -regextype posix-extended \
+        -iregex ".*\.($EXT)" -print0 | sort -z)
+}
+
+is_media() { [[ "${1,,}" =~ \.($EXT)$ ]]; }
+
+# menu of one directory; returns when something was played or the menu was dismissed
+browse() {
+    local dir="$1" top="$2" entries choice
+    while true; do
+        entries=""
+        if [ "$top" = 1 ]; then
+            if is_playing; then
+                entries+="⏯ Pause/resume"$'\n'"⏭ Next"$'\n'"⏮ Previous"$'\n'"⏹ Stop"$'\n'
+            fi
+        else
+            entries+="$PLAY_ALL"$'\n'
+        fi
+        entries+=$(find "$dir" -mindepth 1 -maxdepth 1 \( -type d -printf '%f/\n' -o -type f -printf '%f\n' \) \
+            | while IFS= read -r n; do
+                case "$n" in */) echo "$n" ;; *) is_media "$n" && echo "$n" ;; esac
+              done | sort -f)
+
+        choice=$(printf '%s\n' "$entries" | dmenu -i -l 20 -p "${dir#"$MUSIC_DIR"}/") || return 1
+        [ -z "$choice" ] && return 1
+
+        case "$choice" in
+            "⏯ Pause/resume") mpv_cmd '["cycle","pause"]'; return 0 ;;
+            "⏭ Next")         mpv_cmd '["playlist-next"]'; return 0 ;;
+            "⏮ Previous")     mpv_cmd '["playlist-prev"]'; return 0 ;;
+            "⏹ Stop")         stop_music; return 0 ;;
+            "$PLAY_ALL")
+                local files; collect "$dir" files
+                [ "${#files[@]}" -gt 0 ] && play "${files[@]}"
+                return 0 ;;
+            */) browse "$dir/${choice%/}" 0 && return 0 ;;
+            *)  [ -f "$dir/$choice" ] && { play "$dir/$choice"; return 0; } ;;
+        esac
+    done
+}
+
+browse "$MUSIC_DIR" 1

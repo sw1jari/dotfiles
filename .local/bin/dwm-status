@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+
+GPU_AVAILABLE=0
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+    GPU_AVAILABLE=1
+fi
+
+declare -a _prev_core_total _prev_core_idle
+while read -r _lbl _u _n _s _i _io _irq _sirq _; do
+    case "$_lbl" in
+        cpu)
+            _prev_total=$(( _u + _n + _s + _i + _io + _irq + _sirq ))
+            _prev_idle=$(( _i + _io ))
+            ;;
+        cpu[0-9]*)
+            _c="${_lbl#cpu}"
+            _prev_core_total[$_c]=$(( _u + _n + _s + _i + _io + _irq + _sirq ))
+            _prev_core_idle[$_c]=$(( _i + _io ))
+            ;;
+    esac
+done < <(grep '^cpu' /proc/stat)
+
+_notified_10=0
+_notified_5=0
+
+while true; do
+    _max_core=0
+    while read -r _lbl _u _n _s _i _io _irq _sirq _; do
+        case "$_lbl" in
+            cpu)
+                _total=$(( _u + _n + _s + _i + _io + _irq + _sirq ))
+                _idle=$(( _i + _io ))
+                _dt=$(( _total - _prev_total ))
+                _di=$(( _idle - _prev_idle ))
+                _cpu_avg=$(( _dt > 0 ? (_dt - _di) * 100 / _dt : 0 ))
+                _prev_total=$_total
+                _prev_idle=$_idle
+                ;;
+            cpu[0-9]*)
+                _c="${_lbl#cpu}"
+                _total=$(( _u + _n + _s + _i + _io + _irq + _sirq ))
+                _idle=$(( _i + _io ))
+                _dt=$(( _total - _prev_core_total[$_c] ))
+                _di=$(( _idle - _prev_core_idle[$_c] ))
+                _pct=$(( _dt > 0 ? (_dt - _di) * 100 / _dt : 0 ))
+                (( _pct > _max_core )) && _max_core=$_pct
+                _prev_core_total[$_c]=$_total
+                _prev_core_idle[$_c]=$_idle
+                ;;
+        esac
+    done < <(grep '^cpu' /proc/stat)
+    CPU="CPU $(printf '%3d' $_cpu_avg)% Max $(printf '%3d' $_max_core)%"
+
+    DATE=$(date +"%a %d %b %H:%M")
+    RAM=$(free | awk '/^Mem:/ {printf "RAM %3.0f%%", $3/$2 * 100}')
+
+    GPU_ENTRY=""
+    if [ "$GPU_AVAILABLE" -eq 1 ]; then
+        if GPU_STATS=$(nvidia-smi \
+              --query-gpu=utilization.gpu,memory.used,memory.total \
+              --format=csv,noheader,nounits 2>/dev/null | head -n1); then
+            read -r U MU MT <<<"${GPU_STATS//,/ }"
+            VRAM_PER=$(awk "BEGIN{printf \"%3.0f\", $MU/$MT*100}")
+            GPU_ENTRY="GPU $(printf '%3d' $U)% VRAM ${VRAM_PER}%"
+        fi
+    fi
+
+    BATT_ENTRY=""
+    if [ -d /sys/class/power_supply/BAT0 ]; then
+        P=$(< /sys/class/power_supply/BAT0/capacity)
+        S=$(< /sys/class/power_supply/BAT0/status)
+        case "$S" in
+            Charging)       BATT_ENTRY="⚡ $(printf '%3d' $P)%" ;;
+            Discharging)    BATT_ENTRY="🔋 $(printf '%3d' $P)%" ;;
+            Full)           BATT_ENTRY="🔌 $(printf '%3d' $P)%" ;;
+            "Not charging") BATT_ENTRY="🚫🔌 $(printf '%3d' $P)%" ;;
+            *)              BATT_ENTRY="? $(printf '%3d' $P)%" ;;
+        esac
+
+        [ "$P" -gt 10 ] && _notified_10=0
+        [ "$P" -gt 5 ]  && _notified_5=0
+
+        if [ "$S" = "Discharging" ]; then
+            if [ "$P" -le 5 ] && [ "$_notified_5" -eq 0 ]; then
+                DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+                    dunstify -u critical "Battery critical" "${P}% remaining"
+                _notified_5=1
+            elif [ "$P" -le 10 ] && [ "$_notified_10" -eq 0 ]; then
+                DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+                    dunstify -u normal "Battery low" "${P}% remaining"
+                _notified_10=1
+            fi
+        fi
+    fi
+
+    GOV=$(< /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)
+    case "$GOV" in
+        powersave)   GOV_ENTRY="🐢" ;;
+        performance) GOV_ENTRY="🚀" ;;
+        *)           GOV_ENTRY="$GOV" ;;
+    esac
+
+    _ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | awk -F: '/^yes/{print $2}')
+    if [ -n "$_ssid" ]; then
+        WIFI_ENTRY="📶 ${_ssid:0:10}"
+    else
+        WIFI_ENTRY="📶 off"
+    fi
+
+    parts=( "$RAM" "$CPU" "$GOV_ENTRY" )
+    if [ -r "${XDG_RUNTIME_DIR:-/tmp}/music-now" ]; then
+        read -r _music < "${XDG_RUNTIME_DIR:-/tmp}/music-now"
+        [ ${#_music} -gt 50 ] && _music="${_music:0:49}…"
+        parts=( "$_music" "${parts[@]}" )
+    fi
+    [ -n "$GPU_ENTRY" ] && parts+=( "$GPU_ENTRY" )
+    [ -n "$BATT_ENTRY" ] && parts+=( "$BATT_ENTRY" )
+    parts+=( "$WIFI_ENTRY" "$DATE" )
+
+    status="${parts[0]}"
+    for _p in "${parts[@]:1}"; do status="$status | $_p"; done
+    xsetroot -name "$status"
+
+    sleep 1
+done
